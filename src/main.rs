@@ -10,6 +10,8 @@ use shaggy::shared::commands::{embed, help};
 use shaggy::shared::scheduler::setup_daily_recipe_scheduler;
 use shaggy::shared::types::{Data, Error};
 use shaggy::shared::db::init_db;
+use shaggy::voice::commands::tts;
+use songbird::SerenityInit;
 
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -29,7 +31,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![help(), embed(), recipe(), music()],
+            commands: vec![help(), embed(), recipe(), music(), tts()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(async move {
                     if let Err(e) = on_event(ctx, event, framework, data).await {
@@ -55,8 +57,10 @@ async fn main() -> Result<(), Error> {
         .build();
 
     let intents = serenity::GatewayIntents::non_privileged()
-        | serenity::GatewayIntents::MESSAGE_CONTENT;
+        | serenity::GatewayIntents::MESSAGE_CONTENT
+        | serenity::GatewayIntents::GUILD_VOICE_STATES;
     let mut client = serenity::ClientBuilder::new(token, intents)
+        .register_songbird()
         .framework(framework)
         .await?;
 

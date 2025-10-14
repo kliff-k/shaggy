@@ -2,4 +2,4 @@
 /.idea
 Cargo.lock
 .env
-recipes.db
+shaggy.db
