@@ -1,6 +1,7 @@
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{Attachment, CreateEmbed, GuildChannel};
 
+use crate::shared::db::log_warning;
 use crate::shared::types::{Context, Error};
 
 /// Shows help information
@@ -84,6 +85,74 @@ pub async fn embed(
         )
         .await?;
     }
+
+    Ok(())
+}
+
+/// Send a warning to a user and log it to the database
+#[poise::command(
+    slash_command,
+    guild_only,
+    required_permissions = "ADMINISTRATOR"
+)]
+pub async fn warn(
+    ctx: Context<'_>,
+    #[description = "User to warn"] user: serenity::User,
+    #[description = "Reason for the warning"] reason: String,
+) -> Result<(), Error> {
+    let guild_id = match ctx.guild_id() {
+        Some(g) => g,
+        None => {
+            ctx.say("This command can only be used in a server.").await?;
+            return Ok(());
+        }
+    };
+
+    // let guild_name = ctx.guild().map(|g| g.name.clone()).unwrap_or_else(|| "this server".to_string());
+    // let dm_text = format!(
+    //     "You have received a warning in {}: {}",
+    //     guild_name,
+    //     reason.trim()
+    // );
+    //
+    // match user.create_dm_channel(ctx.http()).await {
+    //     Ok(dm) => {
+    //         if let Err(e) = dm.say(ctx.http(), dm_text.clone()).await {
+    //             tracing::warn!("Failed to send warning DM: {}", e);
+    //         }
+    //     }
+    //     Err(e) => {
+    //         tracing::warn!("Failed to open DM channel to user {}: {}", user.id, e);
+    //         let content = format!("<@{}> you have received a warning: {}", user.id.get(), reason.trim());
+    //         let _ = ctx.say(content).await;
+    //     }
+    // }
+
+    let content = format!("<@{}> you have received a warning: {}", user.id.get(), reason.trim());
+    let _ = ctx.say(content).await;
+
+    if let Err(e) = log_warning(
+        guild_id.get() as i64,
+        user.id.get() as i64,
+        ctx.author().id.get() as i64,
+        reason.trim(),
+    ) {
+        tracing::error!("Failed to log warning: {}", e);
+        ctx.send(
+            poise::CreateReply::default()
+                .content("Warning sent, but failed to log it to the database.")
+                .ephemeral(true),
+        )
+        .await?;
+        return Ok(());
+    }
+
+    ctx.send(
+        poise::CreateReply::default()
+            .content(format!("Warning sent to {} and logged.", user.tag()))
+            .ephemeral(true),
+    )
+    .await?;
 
     Ok(())
 }

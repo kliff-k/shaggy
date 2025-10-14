@@ -3,3 +3,4 @@ pub mod recipe;
 pub mod music;
 pub mod shared;
 pub mod voice;
+pub mod reminder;

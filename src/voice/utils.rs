@@ -13,16 +13,13 @@ pub async fn find_user_voice_channel(ctx: &serenity::Context, guild_id: serenity
 }
 
 pub async fn synthesize_to_wav(text: &str) -> Result<PathBuf, Error> {
-    // Create a temp file path
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_millis();
     let tmp_path = std::env::temp_dir().join(format!("shaggy_tts_{}.wav", now));
 
     let text = text.to_string();
     let out = tmp_path.clone();
 
-    // Try pico2wave first, fallback to espeak
     task::spawn_blocking(move || -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        // prefer pico2wave for naturalness
         let pico = std::process::Command::new("pico2wave")
             .args(["-w", out.to_string_lossy().as_ref(), &text])
             .output();

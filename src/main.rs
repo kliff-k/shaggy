@@ -6,11 +6,12 @@ use tracing::{error, info};
 use shaggy::chat::handler::on_event;
 use shaggy::music::commands::music;
 use shaggy::recipe::commands::recipe;
-use shaggy::shared::commands::{embed, help};
-use shaggy::shared::scheduler::setup_daily_recipe_scheduler;
+use shaggy::shared::commands::{embed, help, warn};
+use shaggy::shared::scheduler::{setup_daily_recipe_scheduler, setup_reminder_scheduler};
 use shaggy::shared::types::{Data, Error};
 use shaggy::shared::db::init_db;
 use shaggy::voice::commands::tts;
+use shaggy::reminder::commands::remind;
 use songbird::SerenityInit;
 
 #[tokio::main]
@@ -24,6 +25,12 @@ async fn main() -> Result<(), Error> {
         .expect("DAILY_RECIPE_CHANNEL_ID must be a valid number");
     let recipe_channel = serenity::ChannelId::new(recipe_channel_id);
 
+    let reminder_channel_id = env::var("DAILY_REMINDER_CHANNEL_ID")
+        .expect("Expected DAILY_REMINDER_CHANNEL_ID in the environment")
+        .parse::<u64>()
+        .expect("DAILY_REMINDER_CHANNEL_ID must be a valid number");
+    let reminder_channel = serenity::ChannelId::new(reminder_channel_id);
+
     let schedule_str = env::var("DAILY_RECIPE_SCHEDULE")
         .expect("Expected DAILY_RECIPE_SCHEDULE in the environment");
 
@@ -31,7 +38,7 @@ async fn main() -> Result<(), Error> {
 
     let framework = poise::Framework::builder()
         .options(poise::FrameworkOptions {
-            commands: vec![help(), embed(), recipe(), music(), tts()],
+            commands: vec![help(), embed(), recipe(), music(), tts(), remind(), warn()],
             event_handler: |ctx, event, framework, data| {
                 Box::pin(async move {
                     if let Err(e) = on_event(ctx, event, framework, data).await {
@@ -50,6 +57,7 @@ async fn main() -> Result<(), Error> {
                 info!("Logged in as {}", _ready.user.name);
 
                 setup_daily_recipe_scheduler(ctx, &schedule, recipe_channel).await?;
+                setup_reminder_scheduler(ctx, reminder_channel).await?;
 
                 Ok(Data {})
             })

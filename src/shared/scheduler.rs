@@ -98,3 +98,81 @@ pub async fn setup_daily_recipe_scheduler(
 
     Ok(())
 }
+
+pub async fn setup_reminder_scheduler(
+    ctx: &serenity::Context,
+    channel: serenity::ChannelId,
+) -> Result<(), Error> {
+    info!("Setting up minute-based reminder scheduler...");
+
+    let http_client = ctx.http.clone();
+    let scheduler = JobScheduler::new().await?;
+
+    // Every minute at second 0
+    let job = Job::new_async("0 * * * * *", move |_uuid, _lock| {
+        let http = http_client.clone();
+        let channel = channel;
+        Box::pin(async move {
+            use chrono::Local;
+            use crate::shared::db::get_reminders_by_time;
+
+            let now = Local::now();
+            let current = now.format("%H:%M").to_string();
+
+            match get_reminders_by_time(&current) {
+                Ok(reminders) => {
+                    if reminders.is_empty() { return; }
+                    for r in reminders {
+                        let note_suffix = r
+                            .note
+                            .as_ref()
+                            .map(|n| if n.trim().is_empty() { String::new() } else { format!(" ({})", n.trim()) })
+                            .unwrap_or_default();
+
+                        let content = match r.kind.as_str() {
+                            "medicine" => format!("⏰ <@{}> Time to take your medicine{}.", r.user_id, note_suffix),
+                            "food" => format!("⏰ <@{}> Time to eat{}.", r.user_id, note_suffix),
+                            other => format!("⏰ <@{}> Reminder: {}{}.", r.user_id, other, note_suffix),
+                        };
+
+                        if r.private {
+                            let user = serenity::UserId::new(r.user_id as u64);
+                            match user.create_dm_channel(&http).await {
+                                Ok(dm) => {
+                                    if let Err(e) = dm.say(&http, content.replace(&format!("<@{}>", r.user_id), "")).await {
+                                        warn!("Failed to send DM reminder to {}: {}", r.user_id, e);
+                                    }
+                                }
+                                Err(e) => {
+                                    warn!("Failed to open DM to {}: {}. Falling back to channel.", r.user_id, e);
+                                    if let Err(e) = channel.say(&http, content.clone()).await {
+                                        error!("Failed to send reminder in channel: {}", e);
+                                    }
+                                }
+                            }
+                        } else {
+                            if let Err(e) = channel.say(&http, content.clone()).await {
+                                error!("Failed to send reminder in channel: {}", e);
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    error!("Failed to fetch reminders for time {}: {}", current, e);
+                }
+            }
+        })
+    })?;
+
+    scheduler.add(job).await?;
+    info!("Reminder job added (every minute).");
+
+    tokio::spawn(async move {
+        if let Err(e) = scheduler.start().await {
+            error!("Reminder scheduler failed to start: {}", e);
+        }
+    });
+    info!("Reminder scheduler started.");
+
+    Ok(())
+}
