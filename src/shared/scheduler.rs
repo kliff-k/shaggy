@@ -113,52 +113,68 @@ pub async fn setup_reminder_scheduler(
         let http = http_client.clone();
         let channel = channel;
         Box::pin(async move {
-            use chrono::Local;
-            use crate::shared::db::get_reminders_by_time;
+            use chrono::{Utc};
+            use chrono_tz::Tz;
+            use crate::shared::db::{get_distinct_timezones, get_reminders_by_time_tz};
 
-            let now = Local::now();
-            let current = now.format("%H:%M").to_string();
-
-            match get_reminders_by_time(&current) {
-                Ok(reminders) => {
-                    if reminders.is_empty() { return; }
-                    for r in reminders {
-                        let note_suffix = r
-                            .note
-                            .as_ref()
-                            .map(|n| if n.trim().is_empty() { String::new() } else { format!(" ({})", n.trim()) })
-                            .unwrap_or_default();
-
-                        let content = match r.kind.as_str() {
-                            "medicine" => format!("⏰ <@{}> Time to take your medicine{}.", r.user_id, note_suffix),
-                            "food" => format!("⏰ <@{}> Time to eat{}.", r.user_id, note_suffix),
-                            other => format!("⏰ <@{}> Reminder: {}{}.", r.user_id, other, note_suffix),
+            // For each timezone present in the DB, compute the local time now and fetch reminders matching HH:MM
+            match get_distinct_timezones() {
+                Ok(timezones) => {
+                    for tz_name in timezones {
+                        let tz: Tz = match tz_name.parse() {
+                            Ok(t) => t,
+                            Err(_) => continue, // skip invalid values
                         };
+                        let now_utc = Utc::now();
+                        let local = now_utc.with_timezone(&tz);
+                        let hhmm = local.format("%H:%M").to_string();
 
-                        if r.private {
-                            let user = serenity::UserId::new(r.user_id as u64);
-                            match user.create_dm_channel(&http).await {
-                                Ok(dm) => {
-                                    if let Err(e) = dm.say(&http, content.replace(&format!("<@{}>", r.user_id), "")).await {
-                                        warn!("Failed to send DM reminder to {}: {}", r.user_id, e);
-                                    }
-                                }
-                                Err(e) => {
-                                    warn!("Failed to open DM to {}: {}. Falling back to channel.", r.user_id, e);
-                                    if let Err(e) = channel.say(&http, content.clone()).await {
-                                        error!("Failed to send reminder in channel: {}", e);
+                        match get_reminders_by_time_tz(&hhmm, &tz_name) {
+                            Ok(reminders) => {
+                                if reminders.is_empty() { continue; }
+                                for r in reminders {
+                                    let note_suffix = r
+                                        .note
+                                        .as_ref()
+                                        .map(|n| if n.trim().is_empty() { String::new() } else { format!(" ({})", n.trim()) })
+                                        .unwrap_or_default();
+
+                                    let content = match r.kind.as_str() {
+                                        "medicine" => format!("⏰ <@{}> Time to take your medicine!{}.", r.user_id, note_suffix),
+                                        "food" => format!("⏰ <@{}> Time to eat!{}.", r.user_id, note_suffix),
+                                        _ => format!("⏰ <@{}> Reminder!{}.", r.user_id, note_suffix),
+                                    };
+
+                                    if r.private {
+                                        let user = serenity::UserId::new(r.user_id as u64);
+                                        match user.create_dm_channel(&http).await {
+                                            Ok(dm) => {
+                                                if let Err(e) = dm.say(&http, content.replace(&format!("<@{}>", r.user_id), "")).await {
+                                                    warn!("Failed to send DM reminder to {}: {}", r.user_id, e);
+                                                }
+                                            }
+                                            Err(e) => {
+                                                warn!("Failed to open DM to {}: {}. Falling back to channel.", r.user_id, e);
+                                                if let Err(e) = channel.say(&http, content.clone()).await {
+                                                    error!("Failed to send reminder in channel: {}", e);
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        if let Err(e) = channel.say(&http, content.clone()).await {
+                                            error!("Failed to send reminder in channel: {}", e);
+                                        }
                                     }
                                 }
                             }
-                        } else {
-                            if let Err(e) = channel.say(&http, content.clone()).await {
-                                error!("Failed to send reminder in channel: {}", e);
+                            Err(e) => {
+                                error!("Failed to fetch reminders for tz {} at {}: {}", tz_name, hhmm, e);
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    error!("Failed to fetch reminders for time {}: {}", current, e);
+                    error!("Failed to obtain distinct reminder timezones: {}", e);
                 }
             }
         })

@@ -1,7 +1,7 @@
 use poise::serenity_prelude as serenity;
 use poise::serenity_prelude::{Attachment, CreateEmbed, GuildChannel};
 
-use crate::shared::db::log_warning;
+use crate::shared::db::{log_warning, get_warnings_for_user};
 use crate::shared::types::{Context, Error};
 
 /// Shows help information
@@ -153,6 +153,80 @@ pub async fn warn(
             .ephemeral(true),
     )
     .await?;
+
+    Ok(())
+}
+
+/// List warnings for a user (defaults to yourself) with a total count at the end
+#[poise::command(slash_command, guild_only)]
+pub async fn warnings(
+    ctx: Context<'_>,
+    #[description = "User to show warnings for (defaults to yourself)"] user: Option<serenity::User>,
+) -> Result<(), Error> {
+    let guild_id = match ctx.guild_id() {
+        Some(g) => g,
+        None => {
+            ctx.say("This command can only be used in a server.").await?;
+            return Ok(())
+        }
+    };
+
+    let target = user.unwrap_or_else(|| ctx.author().clone());
+    let uid = target.id.get() as i64;
+    let gid = guild_id.get() as i64;
+
+    let warnings = match get_warnings_for_user(gid, uid) {
+        Ok(ws) => ws,
+        Err(e) => {
+            tracing::error!("Failed to fetch warnings: {}", e);
+            ctx.send(
+                poise::CreateReply::default()
+                    .content("Failed to fetch warnings. Please try again later.")
+                    .ephemeral(true),
+            ).await?;
+            return Ok(())
+        }
+    };
+
+    if warnings.is_empty() {
+        let who = if target.id == ctx.author().id { "You have".to_string() } else { format!("{} has", target.tag()) };
+        ctx.send(
+            poise::CreateReply::default()
+                .content(format!("{} no warnings.", who))
+                .ephemeral(true),
+        ).await?;
+        return Ok(())
+    }
+
+    let mut header = if target.id == ctx.author().id {
+        "Your warnings:".to_string()
+    } else {
+        format!("Warnings for {}:", target.tag())
+    };
+    header.push('\n');
+
+    let mut chunks: Vec<String> = vec![header];
+    let mut current = String::new();
+    for (idx, w) in warnings.iter().enumerate() {
+        let line = format!("{}. {}\n", idx + 1, w.reason);
+        if chunks.last().unwrap().len() + current.len() + line.len() > 1800 {
+            chunks.push(current);
+            current = String::new();
+        }
+        current.push_str(&line);
+    }
+    if !current.is_empty() { chunks.push(current); }
+
+    // Append total to the last chunk
+    if let Some(last) = chunks.last_mut() {
+        last.push_str(&format!("Total: {}", warnings.len()));
+    }
+
+    // Send chunks
+    for c in chunks {
+        if c.is_empty() { continue; }
+        ctx.send(poise::CreateReply::default().content(c).ephemeral(true)).await?;
+    }
 
     Ok(())
 }
