@@ -1,3 +1,4 @@
+use std::env;
 use std::path::Path;
 use tokio::fs;
 use anyhow::Context as _;
@@ -20,8 +21,8 @@ pub async fn music(ctx: Context<'_>) -> Result<(), Error> {
 pub async fn music_random(ctx: Context<'_>) -> Result<(), Error> {
     ctx.defer().await?;
 
-    let music_folder = "/mnt/nas/Media/Music/Game/";
-    match get_random_song(music_folder).await {
+    let music_folder = env::var("MUSIC_FOLDER").expect("Expected MUSIC_FOLDER in the environment");
+    match get_random_song(Path::new(&music_folder)).await {
         Ok(Some(song_path)) => {
             let file_name = song_path
                 .file_name()
@@ -70,13 +71,11 @@ pub async fn music_ff(
 ) -> Result<(), Error> {
     let base_folder = Game::FF.folder_name();
     let expansion_folder = expansion.folder_name();
-    let path_str = format!(
-        "/mnt/nas/Media/Music/Game/{}/{}",
-        base_folder, expansion_folder
-    );
-    let music_dir = Path::new(&path_str);
 
-    match get_random_song(music_dir).await {
+    let base_path = env::var("MUSIC_FOLDER").expect("Expected MUSIC_FOLDER in the environment");
+    let music_dir = Path::new(&base_path).join(base_folder).join(expansion_folder);
+
+    match get_random_song(&music_dir).await {
         Ok(Some(song_path)) => {
             let file_name = song_path
                 .file_name()
@@ -126,13 +125,11 @@ pub async fn music_kh(
 ) -> Result<(), Error> {
     let base_folder = Game::KH.folder_name();
     let title_folder = title.folder_name();
-    let path_str = format!(
-        "/mnt/nas/Media/Music/Game/{}/{}",
-        base_folder, title_folder
-    );
-    let music_dir = Path::new(&path_str);
 
-    match get_random_song(music_dir).await {
+    let base_path = env::var("MUSIC_FOLDER").expect("Expected MUSIC_FOLDER in the environment");
+    let music_dir = Path::new(&base_path).join(base_folder).join(title_folder);
+
+    match get_random_song(&music_dir).await {
         Ok(Some(song_path)) => {
             let file_name = song_path
                 .file_name()
